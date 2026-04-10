@@ -2,15 +2,12 @@ import requests
 import re
 import socket
 import concurrent.futures
+import base64
+import os
 
-# 1. 增加更多源，包括一些自动生成的聚合订阅
-SOURCES = [
-    "https://raw.githubusercontent.com/mS_one/oneclickvpnkeys/refs/heads/main/singbox.json",
-    "https://raw.githubusercontent.com/vpei/Free-Node-Merge/refs/heads/main/clash.yaml",
-    "https://raw.githubusercontent.com/tina-v1/tina-nodes/refs/heads/main/all_nodes.yaml",
-    "https://raw.githubusercontent.com/anaer/Sub/master/clash.yaml",
-    "https://api.v1.mk/sub?target=clash&url=https://raw.githubusercontent.com/mS_one/oneclickvpnkeys/refs/heads/main/singbox.json"
-]
+# 1. 配置你的 Token (脚本会自动从 Github Action 环境中读取)
+# 如果本地测试，可以手动填入 "ghp_xxxx"
+TOKEN = os.environ.get("MY_GITHUB_TOKEN")
 
 def check_tcp(server, port):
     try:
@@ -19,32 +16,45 @@ def check_tcp(server, port):
     except:
         return False
 
-def fetch_content():
-    all_text = ""
-    for url in SOURCES:
-        try:
-            print(f"[*] 正在爬取: {url}")
-            resp = requests.get(url, timeout=15)
-            if resp.status_code == 200:
-                all_text += resp.text + "\n"
-        except: pass
-    return all_text
+def search_github():
+    if not TOKEN:
+        print("[!] 错误: 未检测到 MY_GITHUB_TOKEN，搜索功能受限")
+        return ""
+    
+    # 模仿你手动的搜索动作：搜索包含 fastervpn.world 的 yaml 或 json 文件
+    url = "https://api.github.com/search/code?q=fastervpn.world+extension:yaml+extension:json"
+    headers = {
+        "Authorization": f"token {TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    combined_content = ""
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+        if resp.status_code == 200:
+            items = resp.json().get('items', [])
+            print(f"[*] 全网搜索找到 {len(items)} 个相关文件，正在提取内容...")
+            for item in items:
+                # 转换成 Raw 链接直接下载
+                raw_url = item['html_url'].replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+                try:
+                    combined_content += requests.get(raw_url, timeout=5).text + "\n"
+                except: continue
+        else:
+            print(f"[!] 搜索失败: {resp.status_code}, 可能是 Token 权限问题")
+    except Exception as e:
+        print(f"[!] 搜索出错: {e}")
+    
+    return combined_content
 
 def extract_nodes(content):
-    # 更加宽松的正则：抓取所有包含 fastervpn.world 的 hysteria2 节点行
-    # 无论是 {name: ...} 格式还是普通的 YAML 格式
-    pattern = r"-\s*\{[^}]*?server:\s*([^, ]*?fastervpn\.world[^, ]*?)[^}]*?type:\s*hysteria2[^}]*?\}"
-    nodes = re.findall(pattern, content, re.IGNORECASE | re.DOTALL)
-    
-    # 重新提取完整的节点块（防止正则截断）
-    final_nodes = []
-    seen_servers = set()
-    
-    # 二次匹配，确保拿到的是完整的 YAML 对象
+    # 匹配所有的 Hysteria2 节点块
     blocks = re.findall(r"-\s*\{[^}]*?fastervpn\.world[^}]*?\}", content)
     
+    final_nodes = []
+    seen_ids = set()
+    
     for block in blocks:
-        # 提取 server 和 port 用于去重和测速
         s_match = re.search(r"server:\s*([^, \}\n\r]+)", block)
         p_match = re.search(r"port:\s*(\d+)", block)
         
@@ -53,26 +63,26 @@ def extract_nodes(content):
             port = p_match.group(2).strip()
             unique_id = f"{server}:{port}"
             
-            if unique_id not in seen_servers:
-                # 在云端简单测速
+            if unique_id not in seen_ids:
                 if check_tcp(server, port):
-                    print(f"[+] 活的节点: {server}")
+                    print(f"[+] 活节点捕获: {server}")
                     final_nodes.append(block)
-                    seen_servers.add(unique_id)
-                else:
-                    print(f"[-] 死的节点: {server}")
-    
+                    seen_ids.add(unique_id)
     return final_nodes
 
 if __name__ == "__main__":
-    raw_content = fetch_content()
-    live_nodes = extract_nodes(raw_content)
+    # 第一步：全网搜索
+    raw_data = search_github()
+    # 第二步：测速并过滤
+    live_nodes = extract_nodes(raw_data)
     
-    print(f"\n[!] 最终捕获到 {len(live_nodes)} 个可用节点")
+    print(f"\n[!] 任务完成，捕获活节点: {len(live_nodes)} 个")
     
     with open("proxies.yaml", "w", encoding="utf-8") as f:
         f.write("proxies:\n")
-        for node in live_nodes:
-            # 统一格式处理
-            line = node.strip().lstrip('-').strip()
-            f.write(f"  - {line}\n")
+        if live_nodes:
+            for node in live_nodes:
+                line = node.strip().lstrip('-').strip()
+                f.write(f"  - {line}\n")
+        else:
+            f.write("  # 本次搜索未发现可用活节点\n")
