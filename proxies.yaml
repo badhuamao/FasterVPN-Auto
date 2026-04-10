@@ -1,2 +1,4 @@
 proxies:
-  # 奇怪，连老巢都空了？请检查网络连接
+  - {name: 'vpn-jp-016.fastervpn.world', server: vpn-jp-016.fastervpn.world, port: 443, type: hysteria2, password: 'fastervpn.world', sni: vpn-jp-016.fastervpn.world, skip-cert-verify: true}
+  - {name: 'vpn-jp-007.fastervpn.world', server: vpn-jp-007.fastervpn.world, port: 443, type: hysteria2, password: 'fastervpn.world', sni: vpn-jp-007.fastervpn.world, skip-cert-verify: true}
+  - {name: 'vpn-jp-013.fastervpn.world', server: vpn-jp-013.fastervpn.world, port: 443, type: hysteria2, password: 'fastervpn.world', sni: vpn-jp-013.fastervpn.world, skip-cert-verify: true}
