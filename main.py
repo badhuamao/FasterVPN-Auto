@@ -10,43 +10,53 @@ TARGET_URLS = [
 
 def harvest():
     final_nodes = []
-    seen = set()
+    seen_uids = set() # 用来物理去重
+    name_counts = {}  # 用来解决 Clash 同名覆盖问题
     headers = {'User-Agent': 'Mozilla/5.0'}
 
     for url in TARGET_URLS:
         try:
             resp = requests.get(url, headers=headers, timeout=15)
             if resp.status_code != 200: continue
-            
             content = resp.text
-            # 1. 尝试匹配 hysteria2:// 格式 (包含密码)
-            # 格式通常是: hysteria2://password@host:port?...
-            link_regex = r"hysteria2://([^@]+)@([\w\d\.-]+?\.fastervpn\.world):(\d+)"
-            for pwd, host, port in re.findall(link_regex, content, re.I):
-                uid = f"{host.lower()}:{port}"
-                if uid not in seen:
-                    node = f"{{name: '{host}', server: {host}, port: {port}, type: hysteria2, password: '{pwd}', sni: {host}, skip-cert-verify: true}}"
+            
+            # 1. 专门对付 hysteria2:// 链接 (优先级最高，最准)
+            links = re.findall(r"hysteria2://([^@]+)@([\w\d\.-]+?\.fastervpn\.world):(\d+)", content, re.I)
+            for pwd, host, port in links:
+                uid = f"{host}:{port}:{pwd}"
+                if uid not in seen_uids:
+                    # 解决同名问题
+                    base_name = host
+                    name_counts[base_name] = name_counts.get(base_name, 0) + 1
+                    display_name = f"{base_name}_{name_counts[base_name]}"
+                    
+                    node = f"{{name: '{display_name}', server: {host}, port: {port}, type: hysteria2, password: '{pwd}', sni: {host}, skip-cert-verify: true}}"
                     final_nodes.append(node)
-                    seen.add(uid)
+                    seen_uids.add(uid)
 
-            # 2. 尝试匹配 YAML/JSON 里的 password 字段
-            # 我们找那些域名和密码离得很近的行
+            # 2. 专门对付 YAML/JSON 块 (更加严谨的查找)
+            # 这种格式通常密码在域名后面几行
             blocks = re.split(r'-\s+name:|{', content)
             for block in blocks:
                 if "fastervpn.world" in block:
-                    host_m = re.search(r"([\w\d\.-]+?\.fastervpn\.world)", block)
-                    port_m = re.search(r"(?:port|server_port)[:\"\s]+(\d+)", block)
-                    pwd_m = re.search(r"(?:password|auth_str)[:\"\s]+['\"]?([^'\"\s,{}]+)['\"]?", block)
+                    h_m = re.search(r"([\w\d\.-]+?\.fastervpn\.world)", block)
+                    p_m = re.search(r"(?:port|server_port)[:\"\s]+(\d+)", block)
+                    # 这里的正则加强了，排除掉引号和逗号
+                    pw_m = re.search(r"(?:password|auth_str)[:\"\s]+['\"]?([^'\"\s,{}]+)['\"]?", block)
                     
-                    if host_m and port_m:
-                        host = host_m.group(1).lower()
-                        port = port_m.group(1)
-                        pwd = pwd_m.group(1) if pwd_m else "test.+" # 找不到就用你截图中出现的默认密码
-                        uid = f"{host}:{port}"
-                        if uid not in seen:
-                            node = f"{{name: '{host}', server: {host}, port: {port}, type: hysteria2, password: '{pwd}', sni: {host}, skip-cert-verify: true}}"
+                    if h_m and p_m:
+                        host = h_m.group(1).lower()
+                        port = p_m.group(1)
+                        pwd = pw_m.group(1) if pw_m else "test.+"
+                        uid = f"{host}:{port}:{pwd}"
+                        if uid not in seen_uids:
+                            base_name = host
+                            name_counts[base_name] = name_counts.get(base_name, 0) + 1
+                            display_name = f"{base_name}_{name_counts[base_name]}"
+                            
+                            node = f"{{name: '{display_name}', server: {host}, port: {port}, type: hysteria2, password: '{pwd}', sni: {host}, skip-cert-verify: true}}"
                             final_nodes.append(node)
-                            seen.add(uid)
+                            seen_uids.add(uid)
         except: continue
             
     return final_nodes
@@ -55,8 +65,5 @@ if __name__ == "__main__":
     nodes = harvest()
     with open("proxies.yaml", "w", encoding="utf-8") as f:
         f.write("proxies:\n")
-        if nodes:
-            for n in nodes: f.write(f"  - {n}\n")
-        else:
-            f.write("  # No nodes found\n")
-    print(f"Done. Found {len(nodes)} nodes.")
+        for n in nodes: f.write(f"  - {n}\n")
+    print(f"任务结束：共抓取 {len(nodes)} 个节点，已处理同名覆盖。")
