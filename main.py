@@ -1,36 +1,44 @@
 import requests
 import re
-import base64
 
-# 搜索关键词
-KEYWORD = "fastervpn.world"
-# 搜索 GitHub 上的公开 YAML/JSON 配置
-SEARCH_URL = f"https://api.github.com/search/code?q={KEYWORD}+extension:yaml+extension:json"
+# 定向精准源
+SOURCES = [
+    "https://raw.githubusercontent.com/mS_one/oneclickvpnkeys/refs/heads/main/singbox.json",
+    "https://raw.githubusercontent.com/vpei/Free-Node-Merge/refs/heads/main/clash.yaml",
+    "https://raw.githubusercontent.com/tina-v1/tina-nodes/refs/heads/main/all_nodes.yaml",
+    "https://api.v1.mk/sub?target=clash&url=https://raw.githubusercontent.com/mS_one/oneclickvpnkeys/refs/heads/main/singbox.json"
+]
 
-def fetch_nodes():
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    # 注意：实际运行时建议在 Actions 中注入 GITHUB_TOKEN 以避免频率限制
-    try:
-        r = requests.get(SEARCH_URL, headers=headers)
-        items = r.json().get('items', [])
-        
-        all_proxies = []
-        for item in items:
-            raw_url = item['html_url'].replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-            content = requests.get(raw_url).text
-            # 这里的正则提取 H2 节点的关键信息 (简化版)
-            nodes = re.findall(r"\{name:.*?" + KEYWORD + ".*?\}", content)
-            all_proxies.extend(nodes)
-            
-        return all_proxies
-    except Exception as e:
-        print(f"Error: {e}")
-        return []
+def extract_nodes():
+    all_content = ""
+    for url in SOURCES:
+        try:
+            print(f"[*] 正在扫描源: {url}")
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 200:
+                all_content += resp.text + "\n"
+        except Exception as e:
+            print(f"[!] 无法连接 {url}: {e}")
+
+    # 重点：匹配 FasterVPN 的 Hysteria2 节点行
+    # 匹配模式：- {name: ..., server: vpn-xxx.fastervpn.world, ... type: hysteria2 ...}
+    pattern = r"-\s*\{name:[^}]*?fastervpn\.world[^}]*?type:\s*hysteria2[^}]*?\}"
+    nodes = re.findall(pattern, all_content, re.IGNORECASE)
+    
+    # 简单的去重处理
+    unique_nodes = list(set(nodes))
+    return unique_nodes
 
 if __name__ == "__main__":
-    proxies = fetch_nodes()
+    nodes = extract_nodes()
+    print(f"[+] 捕获到 {len(nodes)} 个有效的 FasterVPN 节点")
+    
     with open("proxies.yaml", "w", encoding="utf-8") as f:
         f.write("proxies:\n")
-        for p in list(set(proxies)): # 去重
-            f.write(f"  - {p}\n")
-    print(f"成功抓取到 {len(proxies)} 个候选节点")
+        if nodes:
+            for n in nodes:
+                # 清洗一下格式，确保缩进正确
+                clean_node = n.strip().lstrip('-').strip()
+                f.write(f"  - {clean_node}\n")
+        else:
+            f.write("  # 此时此刻没抓到，老友别急，等下次更新\n")
