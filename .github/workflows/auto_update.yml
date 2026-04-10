@@ -2,31 +2,33 @@ name: FasterVPN Auto Update
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # 每 6 小时自动跑一次
-  workflow_dispatch:      # 支持手动点击运行
+    - cron: '0 */4 * * *' # 每4小时跑一次，保持节点新鲜
+  workflow_dispatch:      # 允许你手动点击按钮立刻运行
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # 必须开启写入权限，否则无法更新 proxies.yaml
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run script
+      - name: Execute script
         run: python main.py
 
-      - name: Commit and Push
+      - name: Push results
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add proxies.yaml
-          git commit -m "Update nodes: $(date)" || exit 0
+          git commit -m "自动更新: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
